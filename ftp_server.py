@@ -8,6 +8,12 @@ from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
+class SmartFTPHandler(FTPHandler):
+    def on_connect(self):
+        if type(self).masquerade_address:
+            if self.remote_ip.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.", "127.")):
+                self.masquerade_address = None
+
 advapi32 = ctypes.windll.advapi32
 kernel32 = ctypes.windll.kernel32
 LOGON32_LOGON_NETWORK = 3
@@ -62,7 +68,7 @@ def setup_upnp_ports(cfg):
 
     ip = u.externalipaddress()
     if ip:
-        FTPHandler.masquerade_address = ip
+        SmartFTPHandler.masquerade_address = ip
         print(f"External IP (UPnP): {ip}")
     else:
         print("UPnP: could not get external IP")
@@ -188,8 +194,8 @@ def external_ip_updater(cfg, stop_event):
     interval = cfg.get("external_ip", {}).get("check_interval", 60)
     while not stop_event.wait(interval):
         ip = get_external_ip_upnp()
-        if ip and ip != FTPHandler.masquerade_address:
-            FTPHandler.masquerade_address = ip
+        if ip and ip != SmartFTPHandler.masquerade_address:
+            SmartFTPHandler.masquerade_address = ip
             print(f"External IP updated: {ip}")
 
 def create_server():
@@ -202,18 +208,18 @@ def create_server():
         home = os.path.abspath(anon.get("home_dir", "."))
         authorizer.add_anonymous(home, perm=anon.get("perms", "elr"))
 
-    FTPHandler.authorizer = authorizer
+    SmartFTPHandler.authorizer = authorizer
 
     ext_ip_cfg = cfg.get("external_ip", {})
     if not ext_ip_cfg.get("upnp", False):
-        FTPHandler.masquerade_address = cfg.get("masquerade_address")
+        SmartFTPHandler.masquerade_address = cfg.get("masquerade_address")
 
     ports = cfg.get("passive_ports", [50000, 50010])
-    FTPHandler.passive_ports = range(ports[0], ports[1] + 1)
+    SmartFTPHandler.passive_ports = range(ports[0], ports[1] + 1)
 
     host = cfg.get("host", "0.0.0.0")
     port = cfg.get("port", 21)
-    return cfg, FTPServer((host, port), FTPHandler)
+    return cfg, FTPServer((host, port), SmartFTPHandler)
 
 def main():
     cfg, server = create_server()
@@ -222,13 +228,13 @@ def main():
 
     if ext_ip_cfg.get("upnp", False):
         upnp_obj = setup_upnp_ports(cfg)
-        if not upnp_obj and not FTPHandler.masquerade_address:
-            FTPHandler.masquerade_address = cfg.get("masquerade_address")
+        if not upnp_obj and not SmartFTPHandler.masquerade_address:
+            SmartFTPHandler.masquerade_address = cfg.get("masquerade_address")
 
     print(f"FTP Server started on {cfg['host']}:{cfg['port']}")
     ports = cfg.get("passive_ports", [50000, 50010])
     print(f"Passive ports: {ports[0]}-{ports[1]}")
-    print(f"External IP: {FTPHandler.masquerade_address or '(not set)'}")
+    print(f"External IP: {SmartFTPHandler.masquerade_address or '(not set)'}")
     if ext_ip_cfg.get("upnp", False):
         print(f"UPnP external IP check enabled (interval: {ext_ip_cfg.get('check_interval', 60)}s)")
         print("UPnP port mapping active")
