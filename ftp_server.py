@@ -41,31 +41,60 @@ def get_external_ip_upnp():
 def setup_upnp_ports(cfg):
     try:
         import miniupnpc
+        import socket
+    except ImportError:
+        print("UPnP: miniupnpc not available")
+        return None
+
+    try:
         u = miniupnpc.UPnP()
         u.discoverdelay = 200
-        u.discover()
+        nd = u.discover()
+        if nd == 0:
+            print("UPnP: no gateway found")
+            return None
+        print(f"UPnP: {nd} gateway(s) found")
         u.selectigd()
+        print(f"UPnP: gateway at {u.gateway}, local IP: {u.lanaddr}")
+    except Exception as e:
+        print(f"UPnP discovery failed: {e}")
+        return None
 
-        local_ip = u.lanaddr
+    ip = u.externalipaddress()
+    if ip:
+        FTPHandler.masquerade_address = ip
+        print(f"External IP (UPnP): {ip}")
+    else:
+        print("UPnP: could not get external IP")
 
-        ip = u.externalipaddress()
-        if ip:
-            FTPHandler.masquerade_address = ip
-            print(f"External IP (UPnP): {ip}")
+    local_ip = u.lanaddr
+    if not local_ip or local_ip == "0.0.0.0":
+        local_ip = socket.gethostbyname(socket.gethostname())
+        print(f"UPnP: using local IP from socket: {local_ip}")
 
-        control_port = cfg.get("port", 21)
+    ok = True
+
+    control_port = cfg.get("port", 21)
+    try:
         u.addportmapping(control_port, 'TCP', local_ip, control_port, 'FTP Control', '')
         print(f"UPnP mapped: port {control_port} TCP")
-
-        passive_ports = cfg.get("passive_ports", [50000, 50010])
-        for port in range(passive_ports[0], passive_ports[1] + 1):
-            u.addportmapping(port, 'TCP', local_ip, port, 'FTP Passive', '')
-        print(f"UPnP mapped: ports {passive_ports[0]}-{passive_ports[1]} TCP")
-
-        return u
     except Exception as e:
-        print(f"UPnP setup failed: {e}")
-        return None
+        print(f"UPnP failed to map port {control_port}: {e}")
+        ok = False
+
+    passive_ports = cfg.get("passive_ports", [50000, 50010])
+    mapped = 0
+    for port in range(passive_ports[0], passive_ports[1] + 1):
+        try:
+            u.addportmapping(port, 'TCP', local_ip, port, 'FTP Passive', '')
+            mapped += 1
+        except Exception as e:
+            print(f"UPnP failed to map port {port}: {e}")
+    if mapped > 0:
+        print(f"UPnP mapped: {mapped}/{passive_ports[1] - passive_ports[0] + 1} passive ports")
+        ok = True
+
+    return u if ok else u
 
 def remove_upnp_mappings(u, cfg):
     if u is None:
