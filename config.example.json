@@ -3,9 +3,13 @@
   "port": 21,
   "masquerade_address": "sohai.space",
   "passive_ports": [50000, 50010],
+  "external_ip": {
+    "upnp": true,
+    "check_interval": 60
+  },
   "anonymous": {
     "enabled": true,
-    "home_dir": "D:\\ftp\\public",
+    "home_dir": "D:\\share",
     "perms": "elr"
   },
   "windows_auth": {
