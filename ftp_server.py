@@ -212,10 +212,15 @@ def run_console():
         print("\nServer stopped.")
 
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("install", "remove", "start", "stop", "restart", "debug"):
+    if len(sys.argv) > 1 and sys.argv[1] in ("run",):
+        run_console()
+    elif len(sys.argv) > 1 and sys.argv[1] in ("install", "remove", "start", "stop", "restart", "debug"):
         win32serviceutil.HandleCommandLine(FTPService)
     else:
-        run_console()
+        try:
+            win32serviceutil.HandleCommandLine(FTPService)
+        except Exception:
+            run_console()
 
 if __name__ == "__main__":
     main()
