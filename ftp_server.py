@@ -1,6 +1,8 @@
 import os
 import json
 import sys
+import time
+import threading
 import ctypes
 import ctypes.wintypes
 import win32serviceutil
@@ -29,6 +31,18 @@ def authenticate_windows_user(username, password):
         advapi32.CloseHandle(handle)
         return True
     return False
+
+def get_external_ip_upnp():
+    try:
+        import miniupnpc
+        u = miniupnpc.UPnP()
+        u.discoverdelay = 200
+        u.discover()
+        u.selectigd()
+        ip = u.externalipaddress()
+        return ip if ip else None
+    except Exception:
+        return None
 
 class WindowsAuthorizer(DummyAuthorizer):
     def __init__(self, cfg):
@@ -93,6 +107,14 @@ def load_config():
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
+def external_ip_updater(cfg, stop_event):
+    interval = cfg.get("external_ip", {}).get("check_interval", 60)
+    while not stop_event.wait(interval):
+        ip = get_external_ip_upnp()
+        if ip and ip != FTPHandler.masquerade_address:
+            FTPHandler.masquerade_address = ip
+            print(f"External IP updated: {ip}")
+
 def create_server():
     cfg = load_config()
 
@@ -103,8 +125,18 @@ def create_server():
         home = os.path.abspath(anon.get("home_dir", "."))
         authorizer.add_anonymous(home, perm=anon.get("perms", "elr"))
 
-    FTPHandler.authorizer = authorizer
-    FTPHandler.masquerade_address = cfg.get("masquerade_address")
+    ext_ip_cfg = cfg.get("external_ip", {})
+    if ext_ip_cfg.get("upnp", False):
+        ip = get_external_ip_upnp()
+        if ip:
+            print(f"External IP (UPnP): {ip}")
+            FTPHandler.masquerade_address = ip
+        else:
+            print("UPnP failed, fallback to configured address")
+            FTPHandler.masquerade_address = cfg.get("masquerade_address")
+    else:
+        FTPHandler.masquerade_address = cfg.get("masquerade_address")
+
     ports = cfg.get("passive_ports", [50000, 50010])
     FTPHandler.passive_ports = range(ports[0], ports[1] + 1)
 
@@ -120,9 +152,11 @@ class FTPService(win32serviceutil.ServiceFramework):
     def __init__(self, args):
         super().__init__(args)
         self.server = None
+        self.stop_event = threading.Event()
 
     def SvcStop(self):
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        self.stop_event.set()
         if self.server:
             self.server.close_all()
         servicemanager.LogMsg(
@@ -140,6 +174,9 @@ class FTPService(win32serviceutil.ServiceFramework):
         self.ReportServiceStatus(win32service.SERVICE_RUNNING)
         try:
             self.cfg, self.server = create_server()
+            if self.cfg.get("external_ip", {}).get("upnp", False):
+                t = threading.Thread(target=external_ip_updater, args=(self.cfg, self.stop_event), daemon=True)
+                t.start()
             self.server.serve_forever()
         except Exception as e:
             servicemanager.LogErrorMsg(f"FTP Server error: {e}")
@@ -150,17 +187,25 @@ def run_console():
     print(f"FTP Server started on {cfg['host']}:{cfg['port']}")
     ports = cfg.get("passive_ports", [50000, 50010])
     print(f"Passive ports: {ports[0]}-{ports[1]}")
-    if cfg.get("masquerade_address"):
-        print(f"External IP: {cfg['masquerade_address']}")
+    print(f"External IP: {FTPHandler.masquerade_address or '(not set)'}")
+    ext_ip_cfg = cfg.get("external_ip", {})
+    if ext_ip_cfg.get("upnp", False):
+        print(f"UPnP external IP check enabled (interval: {ext_ip_cfg.get('check_interval', 60)}s)")
     if cfg.get("anonymous", {}).get("enabled", True):
         print(f"Anonymous: read-only access (home: {cfg['anonymous'].get('home_dir', '.')})")
     if cfg.get("windows_auth", {}).get("enabled", True):
         print("Windows users: full access")
     print("Press Ctrl+C to stop")
 
+    stop_event = threading.Event()
+    if ext_ip_cfg.get("upnp", False):
+        t = threading.Thread(target=external_ip_updater, args=(cfg, stop_event), daemon=True)
+        t.start()
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        stop_event.set()
         print("\nServer stopped.")
 
 def main():
