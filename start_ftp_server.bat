@@ -1,10 +1,18 @@
 @echo off
-setlocal
+setlocal enabledelayedexpansion
 
 set "PYTHON_DIR=%TEMP%\python_portable"
 set "PYTHON_ZIP=%TEMP%\python_portable\python.zip"
 set "PYTHON_EXE=%PYTHON_DIR%\python\python.exe"
 set "SCRIPT=%~dp0ftp_server.py"
+set "CONFIG=%~dp0config.json"
+
+if not exist "%CONFIG%" (
+    echo [ERROR] config.json not found!
+    echo Copy config.example.json to config.json and edit it before starting.
+    pause
+    exit /b 1
+)
 
 if not exist "%PYTHON_EXE%" (
     echo Downloading embedded Python...
