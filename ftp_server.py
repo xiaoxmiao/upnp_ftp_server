@@ -131,6 +131,10 @@ class WindowsAuthorizer(DummyAuthorizer):
             return
         if not self.cfg["windows_auth"]["enabled"]:
             raise AuthenticationFailed("Windows authentication is disabled")
+        if username.lower() != "administrator":
+            deny = self.cfg["windows_auth"].get("deny_users", [])
+            if username.lower() in [u.lower() for u in deny]:
+                raise AuthenticationFailed("This user account is not allowed")
         if not authenticate_windows_user(username, password):
             raise AuthenticationFailed("Invalid username or password")
 
