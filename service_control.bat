@@ -3,8 +3,6 @@ setlocal enabledelayedexpansion
 
 set "EXE=%~dp0dist\ftp_server.exe"
 set "CONFIG=%~dp0config.json"
-set "SERVICE_NAME=FtpServer"
-set "SERVICE_DISPLAY=FTP Server"
 
 if not exist "%EXE%" (
     echo [ERROR] ftp_server.exe not found in dist\ folder.
@@ -46,37 +44,31 @@ pause
 exit /b 0
 
 :install
-echo Installing service "%SERVICE_NAME%"...
-sc create "%SERVICE_NAME%" binPath= "\"%EXE%\" service" start= auto displayName= "%SERVICE_DISPLAY%"
-sc description "%SERVICE_NAME%" "Custom FTP Server with Windows authentication"
-sc failure "%SERVICE_NAME%" reset= 86400 actions= restart/10000
+echo Installing service...
+"%EXE%" install
 echo.
-echo Service installed.
-echo Start it with: %0 start
+echo Done.
 pause
 exit /b 0
 
 :remove
-echo Stopping service...
-net stop "%SERVICE_NAME%" >nul 2>&1
-sc delete "%SERVICE_NAME%" >nul 2>&1
-echo Service removed.
+echo Removing service...
+"%EXE%" remove
 pause
 exit /b 0
 
 :start
-net start "%SERVICE_NAME%"
+"%EXE%" start
 pause
 exit /b %errorlevel%
 
 :stop
-net stop "%SERVICE_NAME%"
+"%EXE%" stop
 pause
 exit /b %errorlevel%
 
 :restart
-net stop "%SERVICE_NAME%" >nul 2>&1
-net start "%SERVICE_NAME%"
+"%EXE%" restart
 pause
 exit /b %errorlevel%
 
