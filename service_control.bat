@@ -18,7 +18,7 @@ if not exist "%CONFIG%" (
     exit /b 1
 )
 
-:: Auto-elevate to admin if not already
+:: Auto-elevate to admin
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo Requesting Administrator privileges...
@@ -42,28 +42,24 @@ echo   start            Start the service
 echo   stop             Stop the service
 echo   restart          Restart the service
 echo   run              Run in console mode
-echo.
-echo Examples:
-echo   %0 install
-echo   %0 run
 pause
 exit /b 0
 
 :install
-echo Installing service...
-sc create "%SERVICE_NAME%" binPath= "\"%EXE%\"" start= auto displayName= "%SERVICE_DISPLAY%"
+echo Installing service "%SERVICE_NAME%"...
+sc create "%SERVICE_NAME%" binPath= "\"%EXE%\" service" start= auto displayName= "%SERVICE_DISPLAY%"
 sc description "%SERVICE_NAME%" "Custom FTP Server with Windows authentication"
 sc failure "%SERVICE_NAME%" reset= 86400 actions= restart/10000
 echo.
-echo Service installed: %SERVICE_NAME%
+echo Service installed.
 echo Start it with: %0 start
 pause
 exit /b 0
 
 :remove
-echo Stopping service if running...
+echo Stopping service...
 net stop "%SERVICE_NAME%" >nul 2>&1
-sc delete "%SERVICE_NAME%"
+sc delete "%SERVICE_NAME%" >nul 2>&1
 echo Service removed.
 pause
 exit /b 0
@@ -85,8 +81,6 @@ pause
 exit /b %errorlevel%
 
 :run
-echo Starting FTP Server in console mode...
-echo Config: %CONFIG%
-"%EXE%"
+"%EXE%" run
 pause
 exit /b %errorlevel%

@@ -211,16 +211,29 @@ def run_console():
         stop_event.set()
         print("\nServer stopped.")
 
+def run_as_service():
+    try:
+        servicemanager.Initialize(FTPService._svc_name_)
+        servicemanager.PrepareToHostSingle(FTPService)
+        servicemanager.StartServiceCtrlDispatcher()
+    except Exception as e:
+        servicemanager.LogErrorMsg(f"Service error: {e}")
+
 def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("run",):
-        run_console()
-    elif len(sys.argv) > 1 and sys.argv[1] in ("install", "remove", "start", "stop", "restart", "debug"):
-        win32serviceutil.HandleCommandLine(FTPService)
-    else:
-        try:
-            win32serviceutil.HandleCommandLine(FTPService)
-        except Exception:
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "run":
             run_console()
+            return
+        if sys.argv[1] in ("install", "remove", "start", "stop", "restart", "debug"):
+            win32serviceutil.HandleCommandLine(FTPService)
+            return
+        if sys.argv[1] == "service":
+            run_as_service()
+            return
+    try:
+        win32serviceutil.HandleCommandLine(FTPService)
+    except Exception:
+        run_console()
 
 if __name__ == "__main__":
     main()
