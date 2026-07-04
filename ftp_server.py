@@ -125,6 +125,8 @@ def create_server():
         home = os.path.abspath(anon.get("home_dir", "."))
         authorizer.add_anonymous(home, perm=anon.get("perms", "elr"))
 
+    FTPHandler.authorizer = authorizer
+
     ext_ip_cfg = cfg.get("external_ip", {})
     if ext_ip_cfg.get("upnp", False):
         ip = get_external_ip_upnp()
