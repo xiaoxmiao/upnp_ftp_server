@@ -13,6 +13,7 @@ from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 advapi32 = ctypes.windll.advapi32
+kernel32 = ctypes.windll.kernel32
 LOGON32_LOGON_NETWORK = 3
 LOGON32_PROVIDER_DEFAULT = 0
 
@@ -28,7 +29,7 @@ def authenticate_windows_user(username, password):
         ctypes.byref(handle)
     )
     if result:
-        advapi32.CloseHandle(handle)
+        kernel32.CloseHandle(handle)
         return True
     return False
 
