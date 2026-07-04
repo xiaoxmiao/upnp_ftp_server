@@ -104,7 +104,7 @@ def load_config():
         print(f"Config file not found: {path}")
         print("Copy config.example.json to config.json and edit it.")
         sys.exit(1)
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         return json.load(f)
 
 def external_ip_updater(cfg, stop_event):
