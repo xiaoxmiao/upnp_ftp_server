@@ -131,6 +131,9 @@ class WindowsAuthorizer(DummyAuthorizer):
     def get_home_dir(self, username):
         if username == "anonymous":
             return self.user_table["anonymous"]["home"]
+        home = self.cfg["windows_auth"].get("home_dir")
+        if home:
+            return os.path.abspath(home)
         home = os.path.expanduser(f"~{username}")
         if home.startswith("~") or not os.path.isdir(home):
             home = f"C:\\Users\\{username}"
