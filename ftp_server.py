@@ -1,7 +1,11 @@
 import os
 import json
+import sys
 import ctypes
 import ctypes.wintypes
+import win32serviceutil
+import win32service
+import servicemanager
 from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
@@ -9,6 +13,9 @@ from pyftpdlib.servers import FTPServer
 advapi32 = ctypes.windll.advapi32
 LOGON32_LOGON_NETWORK = 3
 LOGON32_PROVIDER_DEFAULT = 0
+
+SERVICE_NAME = "FtpServer"
+SERVICE_DISPLAY_NAME = "FTP Server"
 
 def authenticate_windows_user(username, password):
     handle = ctypes.wintypes.HANDLE()
@@ -77,15 +84,18 @@ class WindowsAuthorizer(DummyAuthorizer):
         pass
 
 def load_config():
-    path = os.path.join(os.path.dirname(__file__), "config.json")
+    base = sys._MEIPASS if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base, "config.json")
+    if not os.path.exists(path):
+        path = os.path.join(os.path.dirname(sys.executable), "config.json")
     if not os.path.exists(path):
         print(f"Config file not found: {path}")
         print("Copy config.example.json to config.json and edit it.")
-        exit(1)
+        sys.exit(1)
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
-def main():
+def create_server():
     cfg = load_config()
 
     authorizer = WindowsAuthorizer(cfg)
@@ -102,22 +112,64 @@ def main():
 
     host = cfg.get("host", "0.0.0.0")
     port = cfg.get("port", 21)
-    server = FTPServer((host, port), FTPHandler)
+    return cfg, FTPServer((host, port), FTPHandler)
 
-    print(f"FTP Server started on {host}:{port}")
+class FTPService(win32serviceutil.ServiceFramework):
+    _svc_name_ = SERVICE_NAME
+    _svc_display_name_ = SERVICE_DISPLAY_NAME
+    _svc_description_ = "Custom FTP Server with Windows authentication"
+
+    def __init__(self, args):
+        super().__init__(args)
+        self.server = None
+
+    def SvcStop(self):
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        if self.server:
+            self.server.close_all()
+        servicemanager.LogMsg(
+            servicemanager.EVENTLOG_INFORMATION_TYPE,
+            servicemanager.PYS_SERVICE_STOPPED,
+            (self._svc_name_, ""),
+        )
+
+    def SvcDoRun(self):
+        servicemanager.LogMsg(
+            servicemanager.EVENTLOG_INFORMATION_TYPE,
+            servicemanager.PYS_SERVICE_STARTED,
+            (self._svc_name_, ""),
+        )
+        self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+        try:
+            self.cfg, self.server = create_server()
+            self.server.serve_forever()
+        except Exception as e:
+            servicemanager.LogErrorMsg(f"FTP Server error: {e}")
+
+def run_console():
+    cfg, server = create_server()
+
+    print(f"FTP Server started on {cfg['host']}:{cfg['port']}")
+    ports = cfg.get("passive_ports", [50000, 50010])
     print(f"Passive ports: {ports[0]}-{ports[1]}")
     if cfg.get("masquerade_address"):
         print(f"External IP: {cfg['masquerade_address']}")
-    if anon.get("enabled", True):
-        print(f"Anonymous: read-only access (home: {home})")
+    if cfg.get("anonymous", {}).get("enabled", True):
+        print(f"Anonymous: read-only access (home: {cfg['anonymous'].get('home_dir', '.')})")
     if cfg.get("windows_auth", {}).get("enabled", True):
-        print("Windows users: full access (use your Windows credentials)")
+        print("Windows users: full access")
     print("Press Ctrl+C to stop")
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nServer stopped.")
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("install", "remove", "start", "stop", "restart", "debug"):
+        win32serviceutil.HandleCommandLine(FTPService)
+    else:
+        run_console()
 
 if __name__ == "__main__":
     main()
