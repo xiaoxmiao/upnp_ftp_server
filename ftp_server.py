@@ -38,6 +38,54 @@ def get_external_ip_upnp():
     except Exception:
         return None
 
+def setup_upnp_ports(cfg):
+    try:
+        import miniupnpc
+        u = miniupnpc.UPnP()
+        u.discoverdelay = 200
+        u.discover()
+        u.selectigd()
+
+        local_ip = u.lanaddr
+
+        ip = u.externalipaddress()
+        if ip:
+            FTPHandler.masquerade_address = ip
+            print(f"External IP (UPnP): {ip}")
+
+        control_port = cfg.get("port", 21)
+        u.addportmapping(control_port, 'TCP', local_ip, control_port, 'FTP Control', '')
+        print(f"UPnP mapped: port {control_port} TCP")
+
+        passive_ports = cfg.get("passive_ports", [50000, 50010])
+        for port in range(passive_ports[0], passive_ports[1] + 1):
+            u.addportmapping(port, 'TCP', local_ip, port, 'FTP Passive', '')
+        print(f"UPnP mapped: ports {passive_ports[0]}-{passive_ports[1]} TCP")
+
+        return u
+    except Exception as e:
+        print(f"UPnP setup failed: {e}")
+        return None
+
+def remove_upnp_mappings(u, cfg):
+    if u is None:
+        return
+    try:
+        control_port = cfg.get("port", 21)
+        passive_ports = cfg.get("passive_ports", [50000, 50010])
+        try:
+            u.deleteportmapping(control_port, 'TCP')
+        except Exception:
+            pass
+        for port in range(passive_ports[0], passive_ports[1] + 1):
+            try:
+                u.deleteportmapping(port, 'TCP')
+            except Exception:
+                pass
+        print("UPnP: port mappings removed")
+    except Exception as e:
+        print(f"UPnP cleanup failed: {e}")
+
 class WindowsAuthorizer(DummyAuthorizer):
     def __init__(self, cfg):
         super().__init__()
@@ -125,15 +173,7 @@ def create_server():
     FTPHandler.authorizer = authorizer
 
     ext_ip_cfg = cfg.get("external_ip", {})
-    if ext_ip_cfg.get("upnp", False):
-        ip = get_external_ip_upnp()
-        if ip:
-            print(f"External IP (UPnP): {ip}")
-            FTPHandler.masquerade_address = ip
-        else:
-            print("UPnP failed, fallback to configured address")
-            FTPHandler.masquerade_address = cfg.get("masquerade_address")
-    else:
+    if not ext_ip_cfg.get("upnp", False):
         FTPHandler.masquerade_address = cfg.get("masquerade_address")
 
     ports = cfg.get("passive_ports", [50000, 50010])
@@ -145,14 +185,21 @@ def create_server():
 
 def main():
     cfg, server = create_server()
+    upnp_obj = None
+    ext_ip_cfg = cfg.get("external_ip", {})
+
+    if ext_ip_cfg.get("upnp", False):
+        upnp_obj = setup_upnp_ports(cfg)
+        if not upnp_obj and not FTPHandler.masquerade_address:
+            FTPHandler.masquerade_address = cfg.get("masquerade_address")
 
     print(f"FTP Server started on {cfg['host']}:{cfg['port']}")
     ports = cfg.get("passive_ports", [50000, 50010])
     print(f"Passive ports: {ports[0]}-{ports[1]}")
     print(f"External IP: {FTPHandler.masquerade_address or '(not set)'}")
-    ext_ip_cfg = cfg.get("external_ip", {})
     if ext_ip_cfg.get("upnp", False):
         print(f"UPnP external IP check enabled (interval: {ext_ip_cfg.get('check_interval', 60)}s)")
+        print("UPnP port mapping active")
     if cfg.get("anonymous", {}).get("enabled", True):
         print(f"Anonymous: read-only access (home: {cfg['anonymous'].get('home_dir', '.')})")
     if cfg.get("windows_auth", {}).get("enabled", True):
@@ -169,6 +216,8 @@ def main():
     except KeyboardInterrupt:
         stop_event.set()
         print("\nServer stopped.")
+    finally:
+        remove_upnp_mappings(upnp_obj, cfg)
 
 if __name__ == "__main__":
     main()
