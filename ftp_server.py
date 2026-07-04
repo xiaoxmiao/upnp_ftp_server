@@ -37,8 +37,6 @@ class WindowsAuthorizer(DummyAuthorizer):
 
     def validate_authentication(self, username, password, handler):
         if username == "anonymous":
-            if password:
-                raise AuthenticationFailed("Invalid password")
             return
         if not self.cfg["windows_auth"]["enabled"]:
             raise AuthenticationFailed("Windows authentication is disabled")
