@@ -55,7 +55,7 @@ def setup_upnp_ports(cfg):
             return None
         print(f"UPnP: {nd} gateway(s) found")
         u.selectigd()
-        print(f"UPnP: gateway at {u.gateway}, local IP: {u.lanaddr}")
+        print(f"UPnP: local IP: {u.lanaddr}")
     except Exception as e:
         print(f"UPnP discovery failed: {e}")
         return None
@@ -94,7 +94,7 @@ def setup_upnp_ports(cfg):
         print(f"UPnP mapped: {mapped}/{passive_ports[1] - passive_ports[0] + 1} passive ports")
         ok = True
 
-    return u if ok else u
+    return u
 
 def remove_upnp_mappings(u, cfg):
     if u is None:
