@@ -1,13 +1,9 @@
 import os
 import json
 import sys
-import time
 import threading
 import ctypes
 import ctypes.wintypes
-import win32serviceutil
-import win32service
-import servicemanager
 from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
@@ -16,9 +12,6 @@ advapi32 = ctypes.windll.advapi32
 kernel32 = ctypes.windll.kernel32
 LOGON32_LOGON_NETWORK = 3
 LOGON32_PROVIDER_DEFAULT = 0
-
-SERVICE_NAME = "FtpServer"
-SERVICE_DISPLAY_NAME = "FTP Server"
 
 def authenticate_windows_user(username, password):
     handle = ctypes.wintypes.HANDLE()
@@ -147,44 +140,7 @@ def create_server():
     port = cfg.get("port", 21)
     return cfg, FTPServer((host, port), FTPHandler)
 
-class FTPService(win32serviceutil.ServiceFramework):
-    _svc_name_ = SERVICE_NAME
-    _svc_display_name_ = SERVICE_DISPLAY_NAME
-    _svc_description_ = "Custom FTP Server with Windows authentication"
-
-    def __init__(self, args):
-        super().__init__(args)
-        self.server = None
-        self.stop_event = threading.Event()
-
-    def SvcStop(self):
-        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-        self.stop_event.set()
-        if self.server:
-            self.server.close_all()
-        servicemanager.LogMsg(
-            servicemanager.EVENTLOG_INFORMATION_TYPE,
-            servicemanager.PYS_SERVICE_STOPPED,
-            (self._svc_name_, ""),
-        )
-
-    def SvcDoRun(self):
-        servicemanager.LogMsg(
-            servicemanager.EVENTLOG_INFORMATION_TYPE,
-            servicemanager.PYS_SERVICE_STARTED,
-            (self._svc_name_, ""),
-        )
-        self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-        try:
-            self.cfg, self.server = create_server()
-            if self.cfg.get("external_ip", {}).get("upnp", False):
-                t = threading.Thread(target=external_ip_updater, args=(self.cfg, self.stop_event), daemon=True)
-                t.start()
-            self.server.serve_forever()
-        except Exception as e:
-            servicemanager.LogErrorMsg(f"FTP Server error: {e}")
-
-def run_console():
+def main():
     cfg, server = create_server()
 
     print(f"FTP Server started on {cfg['host']}:{cfg['port']}")
@@ -210,12 +166,6 @@ def run_console():
     except KeyboardInterrupt:
         stop_event.set()
         print("\nServer stopped.")
-
-def main():
-    if len(sys.argv) > 1 and sys.argv[1] == "run":
-        run_console()
-    else:
-        win32serviceutil.HandleCommandLine(FTPService)
 
 if __name__ == "__main__":
     main()
