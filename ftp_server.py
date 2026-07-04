@@ -9,31 +9,10 @@ from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 class SmartFTPHandler(FTPHandler):
-    def make_pasv_command(self):
-        """
-        动态处理被动模式（PASV）返回给客户端的 IP 地址
-        """
-        # 1. 检查当前连接的客户端是否是内网/本地环回 IP
-        is_local = self.remote_ip.startswith((
-            "10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", 
-            "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", 
-            "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.", "127."
-        ))
-
-        if is_local:
-            # 如果是局域网内部通过域名或外网IP回流访问：
-            # 临时将伪装地址设为服务器的本地监听 IP，绝不给它外网 IP
-            old_masquerade = self.masquerade_address
-            self.masquerade_address = None
-            try:
-                # 调用原生方法，此时它会使用服务器的局域网 IP（或 127.0.0.1）作为数据通道 IP
-                return super().make_pasv_command()
-            finally:
-                # 必须还原，确保不会影响外网的其他用户并发连接
-                self.masquerade_address = old_masquerade
-        else:
-            # 如果确实是外网用户，保持原样（使用 UPnP 拿到的外网公网 IP）
-            return super().make_pasv_command()
+    def on_connect(self):
+        if type(self).masquerade_address:
+            if self.remote_ip.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.", "127.")):
+                self.masquerade_address = None
 
 advapi32 = ctypes.windll.advapi32
 kernel32 = ctypes.windll.kernel32
