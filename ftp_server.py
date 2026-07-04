@@ -54,7 +54,10 @@ class WindowsAuthorizer(DummyAuthorizer):
     def get_home_dir(self, username):
         if username == "anonymous":
             return self.user_table["anonymous"]["home"]
-        return os.path.expanduser(f"~{username}")
+        home = os.path.expanduser(f"~{username}")
+        if home.startswith("~") or not os.path.isdir(home):
+            home = f"C:\\Users\\{username}"
+        return home
 
     def has_user(self, username):
         if username == "anonymous":
