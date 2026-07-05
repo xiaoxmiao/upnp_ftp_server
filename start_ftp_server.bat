@@ -31,3 +31,4 @@ echo Starting FTP Server...
 "%PYTHON_EXE%" "%SCRIPT%"
 
 pause
+
