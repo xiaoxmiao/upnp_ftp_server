@@ -128,16 +128,24 @@ def get_router_ip_windows():
                 output = result.stdout.decode('utf-8', errors='ignore')
         
         lines = output.split('\n')
-        for line in lines:
-            # 中文: "默认网关"，英文: "Default Gateway"
+        for i, line in enumerate(lines):
+            # 寻找 IPv4 网关行
             if "默认网关" in line or "Default Gateway" in line:
+                # 跳过 IPv6 网关
+                if i > 0 and "IPv6" in lines[i-1]:
+                    continue
+                
                 parts = line.split(':')
                 if len(parts) >= 2:
                     gateway = parts[-1].strip()
-                    # 排除无效的网关
-                    if gateway and gateway != "" and not gateway.startswith("192.0.2"):
-                        print(f"Windows: 获取路由器IP: {gateway}")
-                        return gateway
+                    # 验证是否为有效的 IPv4 地址
+                    if gateway and '.' in gateway:  # IPv4 包含点号
+                        try:
+                            ipaddress.ip_address(gateway)
+                            print(f"Windows: 获取路由器IP: {gateway}")
+                            return gateway
+                        except ValueError:
+                            continue
     except Exception as e:
         print(f"Windows: 获取路由器IP失败: {e}")
     return None
