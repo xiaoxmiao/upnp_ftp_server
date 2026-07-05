@@ -444,6 +444,7 @@ class WindowsAuthorizer(DummyAuthorizer):
             self._tokens.pop(username.lower(), None)
             raise PermissionError(f"Impersonation failed: ImpersonateLoggedOnUser err={ctypes.get_last_error()}")
         self._imp_tokens[threading.get_ident()] = imp_token
+        log.info(f"[IMP] {username} OK")
 
     def terminate_impersonation(self, username):
         if username == "anonymous":
