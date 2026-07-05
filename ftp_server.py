@@ -327,6 +327,7 @@ class WindowsAuthorizer(DummyAuthorizer):
         super().__init__()
         self.cfg = cfg
         self._tokens = {}
+        self._imp_tokens = {}
 
     def validate_authentication(self, username, password, handler):
         if username == "anonymous":
@@ -386,13 +387,31 @@ class WindowsAuthorizer(DummyAuthorizer):
         if username == "anonymous":
             return
         token = self._tokens.get(username.lower())
-        if token:
-            ImpersonateLoggedOnUser(token)
+        if not token:
+            return
+        imp_token = ctypes.wintypes.HANDLE()
+        ok = DuplicateTokenEx(
+            token, 0x02000000, None,
+            SECURITY_IMPERSONATION, TOKEN_TYPE_IMPERSONATION,
+            ctypes.byref(imp_token)
+        )
+        if not ok:
+            log.warning(f"DuplicateTokenEx failed for {username}, err={ctypes.get_last_error()}")
+            return
+        ok = ImpersonateLoggedOnUser(imp_token)
+        if not ok:
+            log.warning(f"ImpersonateLoggedOnUser failed for {username}, err={ctypes.get_last_error()}")
+            kernel32.CloseHandle(imp_token)
+            return
+        self._imp_tokens[threading.get_ident()] = imp_token
 
     def terminate_impersonation(self, username):
         if username == "anonymous":
             return
         RevertToSelf()
+        imp_token = self._imp_tokens.pop(threading.get_ident(), None)
+        if imp_token:
+            kernel32.CloseHandle(imp_token)
 
 def load_config():
     base = sys._MEIPASS if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
