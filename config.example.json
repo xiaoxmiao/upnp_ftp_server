@@ -17,7 +17,8 @@
   "anonymous": {
     "enabled": true,
     "home_dir": "D:\\Share",
-    "perms": "elr"
+    "perms": "elr",
+    "allow_wan": false
   },
 
   "windows_auth": {

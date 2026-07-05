@@ -311,6 +311,8 @@ class WindowsAuthorizer(DummyAuthorizer):
 
     def validate_authentication(self, username, password, handler):
         if username == "anonymous":
+            if not self.cfg["anonymous"].get("allow_wan", True) and not SmartFTPHandler.is_private_ip(handler.remote_ip):
+                raise AuthenticationFailed("Anonymous access from WAN is not allowed")
             return
         if not self.cfg["windows_auth"]["enabled"]:
             raise AuthenticationFailed("Windows authentication is disabled")
