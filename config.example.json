@@ -1,19 +1,29 @@
 {
+  "_comment": "Copy this file to config.json and edit it. All paths use double backslashes on Windows.",
+
   "host": "0.0.0.0",
   "port": 21,
-  "masquerade_address": "sohai.space",
+
+  "masquerade_address": "your-domain.com",
   "passive_ports": [50000, 50010],
+
+  "router_ip": "",
+
   "external_ip": {
     "upnp": true,
     "check_interval": 60
   },
+
   "anonymous": {
     "enabled": true,
-    "home_dir": "D:\\share",
+    "home_dir": "D:\\Share",
     "perms": "elr"
   },
+
   "windows_auth": {
     "enabled": true,
-    "perms": "elradfmw"
+    "home_dir": "D:\\Share",
+    "perms": "elradfmw",
+    "deny_users": ["Guest", "DefaultAccount", "SYSTEM", "LOCAL_SERVICE", "NETWORK_SERVICE"]
   }
 }
