@@ -4,15 +4,49 @@ import sys
 import threading
 import ctypes
 import ctypes.wintypes
+import ipaddress
 from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 class SmartFTPHandler(FTPHandler):
+    # 私有网络范围（写死）
+    PRIVATE_NETWORKS = [
+        ipaddress.ip_network('10.0.0.0/8'),
+        ipaddress.ip_network('172.16.0.0/12'),
+        ipaddress.ip_network('192.168.0.0/16'),
+        ipaddress.ip_network('127.0.0.0/8'),
+        ipaddress.ip_network('fc00::/7'),      # IPv6 private
+        ipaddress.ip_network('fe80::/10'),     # IPv6 link-local
+    ]
+    
+    @classmethod
+    def is_private_ip(cls, ip_string):
+        """检查 IP 是否为私有网络"""
+        try:
+            ip = ipaddress.ip_address(ip_string)
+            return any(ip in net for net in cls.PRIVATE_NETWORKS)
+        except ValueError:
+            return False
+    
     def on_connect(self):
-        if type(self).masquerade_address:
-            if self.remote_ip.startswith(("10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "192.168.", "127.")):
-                self.masquerade_address = None
+        """
+        根据客户端连接来源决定是否使用 masquerade_address
+        - 内网连接：不使用 masquerade，用本地 IP
+        - 外网连接：使用 masquerade_address
+        """
+        if not type(self).masquerade_address:
+            return
+        
+        client_is_private = self.is_private_ip(self.remote_ip)
+        
+        if client_is_private:
+            # 内网客户端：清除 masquerade，使用本地 IP
+            self.masquerade_address = None
+            print(f"[Connect] 内网客户端 {self.remote_ip} -> 使用本地 IP")
+        else:
+            # 外网客户端：保持 masquerade_address
+            print(f"[Connect] 外网客户端 {self.remote_ip} -> 使用 masquerade: {type(self).masquerade_address}")
 
 advapi32 = ctypes.windll.advapi32
 kernel32 = ctypes.windll.kernel32
