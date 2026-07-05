@@ -117,6 +117,41 @@ class SmartFTPHandler(FTPHandler):
             # 外网客户端 → 使用masquerade
             log.info(f"[Connect] 外网客户端 {self.remote_ip} -> 使用 masquerade: {type(self).masquerade_address}")
 
+    def process_command(self, cmd, *args, **kwargs):
+        """拦截每条 FTP 命令，在处理前切换为登录用户的 Windows 身份。"""
+        if self._closed:
+            return
+        self._last_response = ""
+        method = getattr(self, "ftp_" + cmd.replace(" ", "_"))
+
+        authz = self.authorizer
+        impersonated = False
+        if self.authenticated and self.username and self.username != "anonymous":
+            try:
+                authz.impersonate_user_by_token(self.username)
+                impersonated = True
+                log.info(f"[IMP] CMD {cmd} as {self.username}")
+            except PermissionError as e:
+                self.respond("550 " + str(e))
+                return
+            except Exception:
+                pass
+
+        try:
+            method(*args, **kwargs)
+        finally:
+            if impersonated:
+                authz.terminate_impersonation(self.username)
+
+        if self._last_response:
+            code = int(self._last_response[:3])
+            resp = self._last_response[4:]
+            self.log_cmd(cmd, args[0], code, resp)
+
+    def run_as_current_user(self, function, *args, **kwargs):
+        """由 process_command 统一管理模拟，这里直接执行即可。"""
+        return function(*args, **kwargs)
+
 advapi32 = ctypes.windll.advapi32
 kernel32 = ctypes.windll.kernel32
 
@@ -418,7 +453,30 @@ class WindowsAuthorizer(DummyAuthorizer):
         except KeyError:
             return "Goodbye."
 
+    def impersonate_user_by_token(self, username):
+        """仅用缓存令牌模拟用户，不需要密码。由 process_command 调用。"""
+        if username == "anonymous":
+            return
+        token = self._tokens.get(username.lower())
+        if not token:
+            raise PermissionError(f"Impersonation failed: no cached token for {username}")
+        imp_token = ctypes.wintypes.HANDLE()
+        ok = DuplicateTokenEx(
+            token, 0x02000000, None,
+            SECURITY_IMPERSONATION, TOKEN_TYPE_IMPERSONATION,
+            ctypes.byref(imp_token)
+        )
+        if not ok:
+            raise PermissionError(f"Impersonation failed: DuplicateTokenEx err={ctypes.get_last_error()}")
+        ok = ImpersonateLoggedOnUser(imp_token)
+        if not ok:
+            kernel32.CloseHandle(imp_token)
+            raise PermissionError(f"Impersonation failed: ImpersonateLoggedOnUser err={ctypes.get_last_error()}")
+        self._imp_tokens[threading.get_ident()] = imp_token
+        log.info(f"[IMP] {username} OK")
+
     def impersonate_user(self, username, password):
+        """带密码回退的模拟（供 pyftpdlib 的 run_as_current_user 调用）。"""
         if username == "anonymous":
             return
         token = self._tokens.get(username.lower())
@@ -427,6 +485,9 @@ class WindowsAuthorizer(DummyAuthorizer):
             if not token:
                 raise PermissionError("Impersonation failed: unable to re-authenticate")
             self._tokens[username.lower()] = token
+        # 如果当前线程已经模拟了相同的用户，跳过
+        if self._imp_tokens.get(threading.get_ident()):
+            return
         imp_token = ctypes.wintypes.HANDLE()
         ok = DuplicateTokenEx(
             token, 0x02000000, None,
