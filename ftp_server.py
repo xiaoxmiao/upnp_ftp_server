@@ -166,7 +166,7 @@ def authenticate_windows_user(username, password):
     handle = ctypes.wintypes.HANDLE()
     result = advapi32.LogonUserW(
         username, None, password,
-        LOGON32_LOGON_BATCH,
+        LOGON32_LOGON_NETWORK,
         LOGON32_PROVIDER_DEFAULT,
         ctypes.byref(handle)
     )
@@ -423,11 +423,9 @@ class WindowsAuthorizer(DummyAuthorizer):
             return
         token = self._tokens.get(username.lower())
         if not token:
-            log.warning(f"Impersonation: no cached token for {username}, trying password")
             token = authenticate_windows_user(username, password)
             if not token:
-                log.warning(f"Impersonation: auth failed for {username}")
-                return
+                raise PermissionError("Impersonation failed: unable to re-authenticate")
             self._tokens[username.lower()] = token
         imp_token = ctypes.wintypes.HANDLE()
         ok = DuplicateTokenEx(
@@ -436,15 +434,15 @@ class WindowsAuthorizer(DummyAuthorizer):
             ctypes.byref(imp_token)
         )
         if not ok:
-            log.warning(f"DuplicateTokenEx failed for {username}, err={ctypes.get_last_error()}")
-            return
+            kernel32.CloseHandle(token)
+            self._tokens.pop(username.lower(), None)
+            raise PermissionError(f"Impersonation failed: DuplicateTokenEx err={ctypes.get_last_error()}")
         ok = ImpersonateLoggedOnUser(imp_token)
         if not ok:
-            log.warning(f"ImpersonateLoggedOnUser failed for {username}, err={ctypes.get_last_error()}")
             kernel32.CloseHandle(imp_token)
-            return
-        if not check_impersonation():
-            log.warning(f"Impersonation verification FAILED for {username}")
+            kernel32.CloseHandle(token)
+            self._tokens.pop(username.lower(), None)
+            raise PermissionError(f"Impersonation failed: ImpersonateLoggedOnUser err={ctypes.get_last_error()}")
         self._imp_tokens[threading.get_ident()] = imp_token
 
     def terminate_impersonation(self, username):
