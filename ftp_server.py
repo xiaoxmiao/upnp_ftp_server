@@ -130,7 +130,6 @@ class SmartFTPHandler(FTPHandler):
             try:
                 authz.impersonate_user_by_token(self.username)
                 impersonated = True
-                log.info(f"[IMP] CMD {cmd} as {self.username}")
             except PermissionError as e:
                 self.respond("550 " + str(e))
                 return
@@ -196,6 +195,35 @@ GetTokenInformation.argtypes = [
     ctypes.POINTER(ctypes.wintypes.DWORD)
 ]
 GetTokenInformation.restype = ctypes.wintypes.BOOL
+
+ConvertSidToStringSidW = advapi32.ConvertSidToStringSidW
+ConvertSidToStringSidW.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_wchar_p)]
+ConvertSidToStringSidW.restype = ctypes.wintypes.BOOL
+
+LocalFree = kernel32.LocalFree
+LocalFree.argtypes = [ctypes.c_void_p]
+LocalFree.restype = ctypes.c_void_p
+
+def get_thread_user_sid():
+    """获取当前线程模拟令牌的用户 SID 字符串，无模拟则返回 None。"""
+    hToken = ctypes.wintypes.HANDLE()
+    if not OpenThreadToken(kernel32.GetCurrentThread(), TOKEN_QUERY, True, ctypes.byref(hToken)):
+        return None
+    buf = ctypes.create_string_buffer(1024)
+    ret = ctypes.wintypes.DWORD()
+    if not GetTokenInformation(hToken, TokenUser, buf, 1024, ctypes.byref(ret)):
+        kernel32.CloseHandle(hToken)
+        return None
+    # TOKEN_USER structure: SID_AND_ATTRIBUTES at offset 0, which has PSID at offset 0
+    sid_ptr = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p)).contents
+    sid_str = ctypes.c_wchar_p()
+    if ConvertSidToStringSidW(sid_ptr, ctypes.byref(sid_str)):
+        result = sid_str.value
+        LocalFree(sid_str)
+        kernel32.CloseHandle(hToken)
+        return result
+    kernel32.CloseHandle(hToken)
+    return None
 
 def authenticate_windows_user(username, password):
     handle = ctypes.wintypes.HANDLE()
@@ -473,7 +501,8 @@ class WindowsAuthorizer(DummyAuthorizer):
             kernel32.CloseHandle(imp_token)
             raise PermissionError(f"Impersonation failed: ImpersonateLoggedOnUser err={ctypes.get_last_error()}")
         self._imp_tokens[threading.get_ident()] = imp_token
-        log.info(f"[IMP] {username} OK")
+        actual_sid = get_thread_user_sid()
+        log.info(f"[IMP] {username} SID={actual_sid}")
 
     def impersonate_user(self, username, password):
         """带密码回退的模拟（供 pyftpdlib 的 run_as_current_user 调用）。"""
