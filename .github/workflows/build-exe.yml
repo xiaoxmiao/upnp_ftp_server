@@ -22,13 +22,27 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyftpdlib pyasynchat pyasyncore pyinstaller
+          pip install pyftpdlib pyasynchat pyasyncore pyinstaller miniupnpc
       
       - name: Build EXE with PyInstaller
         run: |
           pyinstaller --onefile `
             --name ftp_server `
             --console `
+            --hidden-import miniupnpc `
+            --hidden-import pyftpdlib `
+            --hidden-import pyftpdlib.handlers `
+            --hidden-import pyftpdlib.handlers.ftp.control `
+            --hidden-import pyftpdlib.handlers.ftp.data `
+            --hidden-import pyftpdlib.handlers.ftp.dispatchers `
+            --hidden-import pyftpdlib.handlers.ftp.producers `
+            --hidden-import pyftpdlib.authorizers `
+            --hidden-import pyftpdlib.filesystems `
+            --hidden-import pyftpdlib.servers `
+            --hidden-import pyftpdlib.ioloop `
+            --hidden-import pyftpdlib.log `
+            --hidden-import pyftpdlib.prefork `
+            --hidden-import pyftpdlib.utils `
             ftp_server.py
       
       - name: Prepare release files
