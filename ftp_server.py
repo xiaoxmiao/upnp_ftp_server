@@ -91,23 +91,6 @@ def get_external_ip_upnp():
     except Exception:
         return None
 
-def get_router_ip_upnp():
-    """通过 UPnP 获取路由器IP"""
-    try:
-        import miniupnpc
-        u = miniupnpc.UPnP()
-        u.discoverdelay = 200
-        u.discover()
-        u.selectigd()
-        # 获取路由器的本地IP
-        router_ip = u.lanaddr
-        if router_ip and router_ip != "0.0.0.0":
-            print(f"UPnP: 获取路由器IP: {router_ip}")
-            return router_ip
-    except Exception as e:
-        print(f"UPnP: 获取路由器IP失败: {e}")
-    return None
-
 def get_router_ip_windows():
     """通过 Windows 命令获取路由器IP（默认网关）"""
     try:
@@ -162,12 +145,7 @@ def get_router_ip(cfg):
         print(f"使用配置文件中的路由器IP: {cfg['router_ip']}")
         return cfg["router_ip"]
     
-    # 尝试 UPnP
-    router_ip = get_router_ip_upnp()
-    if router_ip:
-        return router_ip
-    
-    # 尝试 Windows ipconfig
+    # 尝试 Windows ipconfig（或 route print 获取默认网关）
     router_ip = get_router_ip_windows()
     if router_ip:
         return router_ip
