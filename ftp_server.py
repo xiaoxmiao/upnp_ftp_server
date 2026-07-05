@@ -121,6 +121,25 @@ advapi32 = ctypes.windll.advapi32
 kernel32 = ctypes.windll.kernel32
 LOGON32_LOGON_NETWORK = 3
 LOGON32_PROVIDER_DEFAULT = 0
+SECURITY_IMPERSONATION = 2
+TOKEN_TYPE_IMPERSONATION = 2
+TOKEN_DUPLICATE = 2
+
+ImpersonateLoggedOnUser = advapi32.ImpersonateLoggedOnUser
+ImpersonateLoggedOnUser.argtypes = [ctypes.wintypes.HANDLE]
+ImpersonateLoggedOnUser.restype = ctypes.wintypes.BOOL
+
+RevertToSelf = advapi32.RevertToSelf
+RevertToSelf.argtypes = []
+RevertToSelf.restype = ctypes.wintypes.BOOL
+
+DuplicateTokenEx = advapi32.DuplicateTokenEx
+DuplicateTokenEx.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD,
+    ctypes.c_void_p, ctypes.wintypes.DWORD,
+    ctypes.wintypes.DWORD, ctypes.POINTER(ctypes.wintypes.HANDLE)
+]
+DuplicateTokenEx.restype = ctypes.wintypes.BOOL
 
 def authenticate_windows_user(username, password):
     handle = ctypes.wintypes.HANDLE()
@@ -131,9 +150,8 @@ def authenticate_windows_user(username, password):
         ctypes.byref(handle)
     )
     if result:
-        kernel32.CloseHandle(handle)
-        return True
-    return False
+        return handle
+    return None
 
 def get_external_ip_upnp():
     try:
@@ -308,6 +326,7 @@ class WindowsAuthorizer(DummyAuthorizer):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
+        self._tokens = {}
 
     def validate_authentication(self, username, password, handler):
         if username == "anonymous":
@@ -320,8 +339,10 @@ class WindowsAuthorizer(DummyAuthorizer):
             deny = self.cfg["windows_auth"].get("deny_users", [])
             if username.lower() in [u.lower() for u in deny]:
                 raise AuthenticationFailed("This user account is not allowed")
-        if not authenticate_windows_user(username, password):
+        token = authenticate_windows_user(username, password)
+        if token is None:
             raise AuthenticationFailed("Invalid username or password")
+        self._tokens[username.lower()] = token
 
     def get_home_dir(self, username):
         if username == "anonymous":
@@ -342,7 +363,7 @@ class WindowsAuthorizer(DummyAuthorizer):
     def get_perms(self, username):
         if username == "anonymous":
             return self.user_table["anonymous"]["perm"]
-        return self.cfg["windows_auth"]["perms"]
+        return "elradfmw"
 
     def has_perm(self, username, perm, path=None):
         if username == "anonymous":
@@ -362,10 +383,16 @@ class WindowsAuthorizer(DummyAuthorizer):
             return "Goodbye."
 
     def impersonate_user(self, username, password):
-        pass
+        if username == "anonymous":
+            return
+        token = self._tokens.get(username.lower())
+        if token:
+            ImpersonateLoggedOnUser(token)
 
     def terminate_impersonation(self, username):
-        pass
+        if username == "anonymous":
+            return
+        RevertToSelf()
 
 def load_config():
     base = sys._MEIPASS if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
