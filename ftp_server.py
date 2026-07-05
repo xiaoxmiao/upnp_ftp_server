@@ -5,12 +5,14 @@ import threading
 import ctypes
 import ctypes.wintypes
 import ipaddress
+import socket
+import subprocess
 from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 class SmartFTPHandler(FTPHandler):
-    # 私有网络范围（写死）
+    # 内网网络范围（写死）
     PRIVATE_NETWORKS = [
         ipaddress.ip_network('10.0.0.0/8'),
         ipaddress.ip_network('172.16.0.0/12'),
@@ -19,6 +21,10 @@ class SmartFTPHandler(FTPHandler):
         ipaddress.ip_network('fc00::/7'),      # IPv6 private
         ipaddress.ip_network('fe80::/10'),     # IPv6 link-local
     ]
+    
+    # 路由器IP（动态配置）
+    router_ip = None
+    local_ip = None
     
     @classmethod
     def is_private_ip(cls, ip_string):
@@ -31,21 +37,28 @@ class SmartFTPHandler(FTPHandler):
     
     def on_connect(self):
         """
-        根据客户端连接来源决定是否使用 masquerade_address
-        - 内网连接：不使用 masquerade，用本地 IP
-        - 外网连接：使用 masquerade_address
+        根据客户端连接来源判断是否使用 masquerade_address
+        - 客户端是路由器IP → 返回masquerade（内网通过外网域名访问）
+        - 客户端是本地网络内的其他IP → 返回本地IP
+        - 客户端是外网IP → 返回masquerade
         """
         if not type(self).masquerade_address:
             return
         
+        # 如果客户端IP是路由器IP，说明是内网客户端通过外网域名访问
+        if type(self).router_ip and self.remote_ip == type(self).router_ip:
+            print(f"[Connect] 内网客户端通过外网访问 (来自路由器 {self.remote_ip}) -> 使用 masquerade: {type(self).masquerade_address}")
+            return
+        
+        # 检查客户端是否来自本地私网
         client_is_private = self.is_private_ip(self.remote_ip)
         
         if client_is_private:
-            # 内网客户端：清除 masquerade，使用本地 IP
+            # 直接从内网连接 → 使用本地IP
             self.masquerade_address = None
             print(f"[Connect] 内网客户端 {self.remote_ip} -> 使用本地 IP")
         else:
-            # 外网客户端：保持 masquerade_address
+            # 外网客户端 → 使用masquerade
             print(f"[Connect] 外网客户端 {self.remote_ip} -> 使用 masquerade: {type(self).masquerade_address}")
 
 advapi32 = ctypes.windll.advapi32
@@ -78,10 +91,107 @@ def get_external_ip_upnp():
     except Exception:
         return None
 
+def get_router_ip_upnp():
+    """通过 UPnP 获取路由器IP"""
+    try:
+        import miniupnpc
+        u = miniupnpc.UPnP()
+        u.discoverdelay = 200
+        u.discover()
+        u.selectigd()
+        # 获取路由器的本地IP
+        router_ip = u.lanaddr
+        if router_ip and router_ip != "0.0.0.0":
+            print(f"UPnP: 获取路由器IP: {router_ip}")
+            return router_ip
+    except Exception as e:
+        print(f"UPnP: 获取路由器IP失败: {e}")
+    return None
+
+def get_router_ip_windows():
+    """通过 Windows 命令获取路由器IP（默认网关）"""
+    try:
+        # 使用 GBK 编码（Windows 中文系统默认编码）
+        result = subprocess.run(
+            ["ipconfig"],
+            capture_output=True,
+            text=False
+        )
+        
+        # 尝试 GBK 解码，失败则尝试 UTF-8
+        try:
+            output = result.stdout.decode('gbk')
+        except UnicodeDecodeError:
+            try:
+                output = result.stdout.decode('utf-8')
+            except UnicodeDecodeError:
+                output = result.stdout.decode('utf-8', errors='ignore')
+        
+        lines = output.split('\n')
+        for i, line in enumerate(lines):
+            # 寻找 IPv4 网关行
+            if "默认网关" in line or "Default Gateway" in line:
+                # 跳过 IPv6 网关
+                if i > 0 and "IPv6" in lines[i-1]:
+                    continue
+                
+                parts = line.split(':')
+                if len(parts) >= 2:
+                    gateway = parts[-1].strip()
+                    # 验证是否为有效的 IPv4 地址
+                    if gateway and '.' in gateway:  # IPv4 包含点号
+                        try:
+                            ipaddress.ip_address(gateway)
+                            print(f"Windows: 获取路由器IP: {gateway}")
+                            return gateway
+                        except ValueError:
+                            continue
+    except Exception as e:
+        print(f"Windows: 获取路由器IP失败: {e}")
+    return None
+
+def get_router_ip(cfg):
+    """
+    优先级：
+    1. 配置文件中指定
+    2. UPnP 自动获取
+    3. Windows ipconfig 获取
+    """
+    # 检查配置文件
+    if cfg.get("router_ip"):
+        print(f"使用配置文件中的路由器IP: {cfg['router_ip']}")
+        return cfg["router_ip"]
+    
+    # 尝试 UPnP
+    router_ip = get_router_ip_upnp()
+    if router_ip:
+        return router_ip
+    
+    # 尝试 Windows ipconfig
+    router_ip = get_router_ip_windows()
+    if router_ip:
+        return router_ip
+    
+    print("警告: 无法获取路由器IP")
+    return None
+
+def get_local_ip():
+    """获取本机IP"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return None
+
 def setup_upnp_ports(cfg):
     try:
         import miniupnpc
-        import socket
     except ImportError:
         print("UPnP: miniupnpc not available")
         return None
@@ -109,8 +219,9 @@ def setup_upnp_ports(cfg):
 
     local_ip = u.lanaddr
     if not local_ip or local_ip == "0.0.0.0":
-        local_ip = socket.gethostbyname(socket.gethostname())
-        print(f"UPnP: using local IP from socket: {local_ip}")
+        local_ip = get_local_ip()
+        if local_ip:
+            print(f"UPnP: using local IP from socket: {local_ip}")
 
     ok = True
 
@@ -248,6 +359,13 @@ def create_server():
 
     SmartFTPHandler.authorizer = authorizer
 
+    # 获取本机 IP
+    SmartFTPHandler.local_ip = get_local_ip()
+    print(f"Local IP: {SmartFTPHandler.local_ip}")
+    
+    # 获取路由器 IP
+    SmartFTPHandler.router_ip = get_router_ip(cfg)
+
     ext_ip_cfg = cfg.get("external_ip", {})
     if not ext_ip_cfg.get("upnp", False):
         SmartFTPHandler.masquerade_address = cfg.get("masquerade_address")
@@ -273,6 +391,7 @@ def main():
     ports = cfg.get("passive_ports", [50000, 50010])
     print(f"Passive ports: {ports[0]}-{ports[1]}")
     print(f"External IP: {SmartFTPHandler.masquerade_address or '(not set)'}")
+    print(f"Router IP: {SmartFTPHandler.router_ip or '(not detected)'}")
     if ext_ip_cfg.get("upnp", False):
         print(f"UPnP external IP check enabled (interval: {ext_ip_cfg.get('check_interval', 60)}s)")
         print("UPnP port mapping active")
