@@ -33,7 +33,10 @@ class DailyFileHandler(logging.Handler):
         return self._handler
 
     def emit(self, record):
-        self._ensure().emit(record)
+        h = self._ensure()
+        if self.formatter:
+            h.setFormatter(self.formatter)
+        h.emit(record)
 
     def close(self):
         if self._handler:
@@ -49,12 +52,12 @@ def setup_logging():
 
     fh = DailyFileHandler(log_dir)
     fh.setLevel(logging.INFO)
-    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+    fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     log.addHandler(fh)
 
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter("%(message)s"))
+    ch.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     log.addHandler(ch)
 
     for logger_name in ["pyftpdlib", "pyftpdlib.log", "pyftpdlib.ioloop"]:
