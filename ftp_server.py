@@ -119,11 +119,17 @@ class SmartFTPHandler(FTPHandler):
 
 advapi32 = ctypes.windll.advapi32
 kernel32 = ctypes.windll.kernel32
-LOGON32_LOGON_NETWORK = 3
+
+LOGON32_LOGON_BATCH = 4
 LOGON32_PROVIDER_DEFAULT = 0
+LOGON32_LOGON_NETWORK = 3
+
 SECURITY_IMPERSONATION = 2
 TOKEN_TYPE_IMPERSONATION = 2
-TOKEN_DUPLICATE = 2
+TOKEN_QUERY = 8
+TokenUser = 1
+TokenGroups = 2
+TokenStatistics = 9
 
 ImpersonateLoggedOnUser = advapi32.ImpersonateLoggedOnUser
 ImpersonateLoggedOnUser.argtypes = [ctypes.wintypes.HANDLE]
@@ -141,17 +147,46 @@ DuplicateTokenEx.argtypes = [
 ]
 DuplicateTokenEx.restype = ctypes.wintypes.BOOL
 
+OpenThreadToken = advapi32.OpenThreadToken
+OpenThreadToken.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD,
+    ctypes.wintypes.BOOL, ctypes.POINTER(ctypes.wintypes.HANDLE)
+]
+OpenThreadToken.restype = ctypes.wintypes.BOOL
+
+GetTokenInformation = advapi32.GetTokenInformation
+GetTokenInformation.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD,
+    ctypes.c_void_p, ctypes.wintypes.DWORD,
+    ctypes.POINTER(ctypes.wintypes.DWORD)
+]
+GetTokenInformation.restype = ctypes.wintypes.BOOL
+
 def authenticate_windows_user(username, password):
     handle = ctypes.wintypes.HANDLE()
     result = advapi32.LogonUserW(
         username, None, password,
-        LOGON32_LOGON_NETWORK,
+        LOGON32_LOGON_BATCH,
         LOGON32_PROVIDER_DEFAULT,
         ctypes.byref(handle)
     )
     if result:
         return handle
     return None
+
+def check_impersonation():
+    """Verify current thread is impersonating a non-SYSTEM user. Returns True if impersonation is active."""
+    hToken = ctypes.wintypes.HANDLE()
+    if not OpenThreadToken(kernel32.GetCurrentThread(), TOKEN_QUERY, True, ctypes.byref(hToken)):
+        err = ctypes.get_last_error()
+        if err == 1008:  # ERROR_NO_TOKEN - no impersonation
+            log.warning("Imp check: no impersonation token on thread (running as SYSTEM)")
+        else:
+            log.warning(f"Imp check: OpenThreadToken failed, err={err}")
+        return False
+    kernel32.CloseHandle(hToken)
+    log.info("Imp check: impersonation IS active")
+    return True
 
 def get_external_ip_upnp():
     try:
@@ -388,7 +423,12 @@ class WindowsAuthorizer(DummyAuthorizer):
             return
         token = self._tokens.get(username.lower())
         if not token:
-            return
+            log.warning(f"Impersonation: no cached token for {username}, trying password")
+            token = authenticate_windows_user(username, password)
+            if not token:
+                log.warning(f"Impersonation: auth failed for {username}")
+                return
+            self._tokens[username.lower()] = token
         imp_token = ctypes.wintypes.HANDLE()
         ok = DuplicateTokenEx(
             token, 0x02000000, None,
@@ -403,6 +443,8 @@ class WindowsAuthorizer(DummyAuthorizer):
             log.warning(f"ImpersonateLoggedOnUser failed for {username}, err={ctypes.get_last_error()}")
             kernel32.CloseHandle(imp_token)
             return
+        if not check_impersonation():
+            log.warning(f"Impersonation verification FAILED for {username}")
         self._imp_tokens[threading.get_ident()] = imp_token
 
     def terminate_impersonation(self, username):
