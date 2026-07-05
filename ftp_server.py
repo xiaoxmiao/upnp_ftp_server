@@ -16,7 +16,7 @@ from pyftpdlib.servers import FTPServer
 log = logging.getLogger("ftp_server")
 
 def setup_logging():
-    base = sys._MEIPASS if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
     log_dir = os.path.join(base, "log")
     os.makedirs(log_dir, exist_ok=True)
 
