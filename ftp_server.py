@@ -92,45 +92,25 @@ def get_external_ip_upnp():
         return None
 
 def get_router_ip_windows():
-    """通过 Windows 命令获取路由器IP（默认网关）"""
+    """通过 route print 获取默认网关"""
     try:
-        # 使用 GBK 编码（Windows 中文系统默认编码）
         result = subprocess.run(
-            ["ipconfig"],
-            capture_output=True,
-            text=False
+            ["route", "print", "0.0.0.0"],
+            capture_output=True, text=True
         )
-        
-        # 尝试 GBK 解码，失败则尝试 UTF-8
-        try:
-            output = result.stdout.decode('gbk')
-        except UnicodeDecodeError:
-            try:
-                output = result.stdout.decode('utf-8')
-            except UnicodeDecodeError:
-                output = result.stdout.decode('utf-8', errors='ignore')
-        
-        lines = output.split('\n')
-        for i, line in enumerate(lines):
-            # 寻找 IPv4 网关行
-            if "默认网关" in line or "Default Gateway" in line:
-                # 跳过 IPv6 网关
-                if i > 0 and "IPv6" in lines[i-1]:
-                    continue
-                
-                parts = line.split(':')
-                if len(parts) >= 2:
-                    gateway = parts[-1].strip()
-                    # 验证是否为有效的 IPv4 地址
-                    if gateway and '.' in gateway:  # IPv4 包含点号
-                        try:
-                            ipaddress.ip_address(gateway)
-                            print(f"Windows: 获取路由器IP: {gateway}")
-                            return gateway
-                        except ValueError:
-                            continue
+        for line in result.stdout.splitlines():
+            if "0.0.0.0" in line:
+                parts = line.split()
+                if len(parts) >= 3 and parts[2].count('.') == 3:
+                    gateway = parts[2]
+                    try:
+                        ipaddress.ip_address(gateway)
+                        print(f"Router IP: {gateway}")
+                        return gateway
+                    except ValueError:
+                        continue
     except Exception as e:
-        print(f"Windows: 获取路由器IP失败: {e}")
+        print(f"Router IP detection failed: {e}")
     return None
 
 def get_router_ip(cfg):
