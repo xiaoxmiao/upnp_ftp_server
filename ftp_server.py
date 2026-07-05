@@ -8,12 +8,37 @@ import ipaddress
 import socket
 import subprocess
 import logging
-from logging.handlers import TimedRotatingFileHandler
+from datetime import datetime
 from pyftpdlib.authorizers import DummyAuthorizer, AuthenticationFailed
 from pyftpdlib.handlers import FTPHandler
 from pyftpdlib.servers import FTPServer
 
 log = logging.getLogger("ftp_server")
+
+class DailyFileHandler(logging.Handler):
+    def __init__(self, log_dir):
+        super().__init__()
+        self.log_dir = log_dir
+        self.current_date = None
+        self._handler = None
+
+    def _ensure(self):
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        if date_str != self.current_date:
+            if self._handler:
+                self._handler.close()
+            path = os.path.join(self.log_dir, f"{date_str}.log")
+            self._handler = logging.FileHandler(path, encoding="utf-8")
+            self.current_date = date_str
+        return self._handler
+
+    def emit(self, record):
+        self._ensure().emit(record)
+
+    def close(self):
+        if self._handler:
+            self._handler.close()
+        super().close()
 
 def setup_logging():
     base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
@@ -22,18 +47,7 @@ def setup_logging():
 
     log.setLevel(logging.INFO)
 
-    def namer(name):
-        import re
-        m = re.search(r"\.(\d{4}-\d{2}-\d{2})$", name)
-        if m:
-            return os.path.join(os.path.dirname(name), f"{m.group(1)}.log")
-        return name
-
-    fh = TimedRotatingFileHandler(
-        os.path.join(log_dir, "ftp-server.log"),
-        when="midnight", interval=1, encoding="utf-8", backupCount=90
-    )
-    fh.namer = namer
+    fh = DailyFileHandler(log_dir)
     fh.setLevel(logging.INFO)
     fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
     log.addHandler(fh)
